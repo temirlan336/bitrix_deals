@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: freedom_bitrix_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bitrix
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TZ: UTC
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bitrix"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: freedom_bitrix_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BITRIX_WEBHOOK_BASE_URL: ${BITRIX_WEBHOOK_BASE_URL}
+    ports:
+      - "8080:8080"
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: freedom_bitrix_ngrok
+    restart: unless-stopped
+    depends_on:
+      - api
+    command: ["http", "api:8080", "--log=stdout"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+
+volumes:
+  postgres_data:

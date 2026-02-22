@@ -1,0 +1,11 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs and temp
+*.log
+tmp/
+
+# macOS
+.DS_Store
