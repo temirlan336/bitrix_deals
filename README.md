@@ -1,4 +1,4 @@
-# freedom_bitrix
+# bitrix_deals
 
 Сервис для загрузки сделок из Bitrix24 в PostgreSQL и выдачи данных по HTTP для интеграции с Google Sheets.
 
@@ -102,15 +102,6 @@ DDL находится в `0001_create_db.sql`.
 - `bitrix_deals`
 - `sync_state`
 - индекс `bitrix_deals_date_modify_idx`
-
-## Где хранить описание API и Postman
-
-Для текущего проекта (только `GET /deals/sheets`) достаточно:
-
-- `docs/api/README.md` — краткое описание endpoint и примеры `curl`
-- `docs/postman/FreedomBitrix.postman_collection.json` — экспорт Postman-коллекции (опционально)
-
-Секреты (токены, webhook, пароли) храните в `.env*`, а в Postman используйте переменные.
 
 ## Полезные команды
 
