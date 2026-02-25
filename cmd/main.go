@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	stateKey = "deals_sync"
-	overlap  = 10 * time.Minute
+	stateKey      = "deals_sync"
+	overlap       = 10 * time.Minute
+	deltaInterval = 10 * time.Minute
 )
 
 func main() {
@@ -47,7 +48,7 @@ func main() {
 	}
 
 	syncService := syncer.NewService(bx, repository, stateKey, overlap)
-	httpServer := server.New(repository, bx)
+	httpServer := server.New(repository, bx, stateKey)
 
 	switch mode {
 	case "full":
@@ -62,6 +63,7 @@ func main() {
 		if err := syncService.DeltaSync(runCtx); err != nil {
 			log.Fatal(err)
 		}
+		startDeltaLoop(syncService, deltaInterval)
 		if err := httpServer.Start(":8080"); err != nil {
 			log.Fatal(err)
 		}
@@ -76,4 +78,20 @@ func main() {
 	}
 
 	log.Println("DONE")
+}
+
+func startDeltaLoop(syncService *syncer.Service, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for tickAt := range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+			err := syncService.DeltaSync(ctx)
+			cancel()
+			if err != nil {
+				log.Printf("periodic delta at %s failed: %v", tickAt.UTC().Format(time.RFC3339), err)
+			}
+		}
+	}()
 }

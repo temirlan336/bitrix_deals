@@ -14,6 +14,7 @@ type Service struct {
 	repo        *repo.DealsRepository
 	stateKey    string
 	overlap     time.Duration
+	staleAfter  time.Duration
 	categories  []int
 	retryCount  int
 	requestWait time.Duration
@@ -25,6 +26,7 @@ func NewService(bitrixClient *bitrix.Client, repository *repo.DealsRepository, s
 		repo:        repository,
 		stateKey:    stateKey,
 		overlap:     overlap,
+		staleAfter:  2 * time.Hour,
 		categories:  []int{1, 31, 29},
 		retryCount:  3,
 		requestWait: 300 * time.Millisecond,
@@ -122,6 +124,8 @@ func (s *Service) DeltaSync(ctx context.Context) error {
 
 	from := wm.Add(-s.overlap)
 	fromStr := from.UTC().Format(time.RFC3339)
+	log.Printf("DELTA SYNC range: watermark=%s from=%s overlap=%s",
+		wm.UTC().Format(time.RFC3339), fromStr, s.overlap)
 
 	payload := map[string]any{
 		"SELECT": dealSelectFields(),
@@ -187,6 +191,12 @@ func (s *Service) DeltaSync(ctx context.Context) error {
 			return fmt.Errorf("set watermark: %w", err)
 		}
 		log.Printf("DELTA SYNC watermark=%s", maxModify.UTC().Format(time.RFC3339))
+	} else if !wm.IsZero() {
+		age := time.Since(wm)
+		if age > s.staleAfter {
+			log.Printf("WARN delta sync: no newer deals for %s (watermark=%s)",
+				age.Round(time.Minute), wm.UTC().Format(time.RFC3339))
+		}
 	}
 
 	log.Println("DELTA SYNC END")

@@ -3,16 +3,23 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"freedom_bitrix/internal/bitrix"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type DealsRepository struct {
 	pool *pgxpool.Pool
+}
+
+type SyncStatus struct {
+	Watermark      *time.Time `json:"watermark"`
+	LastDealModify *time.Time `json:"last_deal_modify"`
 }
 
 type DealRow struct {
@@ -181,7 +188,10 @@ func (r *DealsRepository) GetWatermark(ctx context.Context, key string) (time.Ti
 	var wm time.Time
 	err := r.pool.QueryRow(ctx, `SELECT watermark FROM sync_state WHERE key=$1`, key).Scan(&wm)
 	if err != nil {
-		return time.Time{}, nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
 	}
 	return wm, nil
 }
@@ -192,6 +202,19 @@ INSERT INTO sync_state(key, watermark) VALUES($1, $2)
 ON CONFLICT (key) DO UPDATE SET watermark=EXCLUDED.watermark, updated_at=now()
 `, key, wm)
 	return err
+}
+
+func (r *DealsRepository) GetSyncStatus(ctx context.Context, key string) (SyncStatus, error) {
+	var st SyncStatus
+	err := r.pool.QueryRow(ctx, `
+SELECT
+  (SELECT watermark FROM sync_state WHERE key=$1),
+  (SELECT max(date_modify) FROM bitrix_deals)
+`, key).Scan(&st.Watermark, &st.LastDealModify)
+	if err != nil {
+		return SyncStatus{}, err
+	}
+	return st, nil
 }
 
 func (r *DealsRepository) ListDeals(ctx context.Context) ([]DealRow, error) {

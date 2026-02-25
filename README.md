@@ -77,7 +77,7 @@ go run ./cmd serve-delta
 - `full` — полный импорт сделок с `>=DATE_CREATE: 2024-01-01`.
 - `delta` — обновление по `>=DATE_MODIFY` от watermark с overlap 10 минут.
 - `serve` — только HTTP сервер.
-- `serve-delta` — сначала `delta`, затем HTTP сервер (режим по умолчанию в Dockerfile).
+- `serve-delta` — сначала `delta`, затем HTTP сервер и фоновый `delta` каждые `10 минут` (режим по умолчанию в Dockerfile).
 
 ## HTTP API
 
@@ -92,6 +92,21 @@ go run ./cmd serve-delta
 
 ```bash
 curl http://localhost:8080/deals/sheets
+```
+
+### `GET /health/sync`
+
+Показывает состояние синхронизации:
+
+- `watermark`
+- `last_deal_modify`
+- возраст watermark/последней сделки в секундах
+- `status` (`ok` / `stale` / `no_watermark`)
+
+Пример:
+
+```bash
+curl http://localhost:8080/health/sync
 ```
 
 ## Схема БД

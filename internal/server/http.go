@@ -20,17 +20,18 @@ const (
 )
 
 type Server struct {
-	repo       *repo.DealsRepository
-	bitrix     *bitrix.Client
-	mappingTTL time.Duration
-	sheetsLoc  *time.Location
+	repo         *repo.DealsRepository
+	bitrix       *bitrix.Client
+	syncStateKey string
+	mappingTTL   time.Duration
+	sheetsLoc    *time.Location
 
 	mu            sync.RWMutex
 	cachedMapping dealMappings
 	cacheUpdated  time.Time
 }
 
-func New(repository *repo.DealsRepository, bitrixClient *bitrix.Client) *Server {
+func New(repository *repo.DealsRepository, bitrixClient *bitrix.Client, syncStateKey string) *Server {
 	loc, err := time.LoadLocation("Asia/Almaty")
 	if err != nil {
 		loc = time.FixedZone("UTC+5", 5*60*60)
@@ -39,6 +40,7 @@ func New(repository *repo.DealsRepository, bitrixClient *bitrix.Client) *Server 
 	return &Server{
 		repo:          repository,
 		bitrix:        bitrixClient,
+		syncStateKey:  strings.TrimSpace(syncStateKey),
 		mappingTTL:    10 * time.Minute,
 		sheetsLoc:     loc,
 		cachedMapping: newDealMappings(),
@@ -48,9 +50,64 @@ func New(repository *repo.DealsRepository, bitrixClient *bitrix.Client) *Server 
 func (s *Server) Start(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/deals/sheets", s.handleDealsSheets)
+	mux.HandleFunc("/health/sync", s.handleSyncHealth)
 
 	log.Printf("HTTP server on %s", addr)
 	return http.ListenAndServe(addr, mux)
+}
+
+type syncHealthResponse struct {
+	StateKey       string  `json:"state_key"`
+	NowUTC         string  `json:"now_utc"`
+	Watermark      *string `json:"watermark,omitempty"`
+	LastDealModify *string `json:"last_deal_modify,omitempty"`
+	WatermarkAgeS  *int64  `json:"watermark_age_seconds,omitempty"`
+	LastDealAgeS   *int64  `json:"last_deal_age_seconds,omitempty"`
+	Status         string  `json:"status"`
+}
+
+func (s *Server) handleSyncHealth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	st, err := s.repo.GetSyncStatus(ctx, s.syncStateKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	now := time.Now().UTC()
+	resp := syncHealthResponse{
+		StateKey: s.syncStateKey,
+		NowUTC:   now.Format(time.RFC3339),
+		Status:   "ok",
+	}
+
+	if st.Watermark == nil {
+		resp.Status = "no_watermark"
+	} else {
+		wm := st.Watermark.UTC()
+		wmStr := wm.Format(time.RFC3339)
+		age := int64(now.Sub(wm).Seconds())
+		resp.Watermark = &wmStr
+		resp.WatermarkAgeS = &age
+		if age > int64((2 * time.Hour).Seconds()) {
+			resp.Status = "stale"
+		}
+	}
+
+	if st.LastDealModify != nil {
+		dm := st.LastDealModify.UTC()
+		dmStr := dm.Format(time.RFC3339)
+		age := int64(now.Sub(dm).Seconds())
+		resp.LastDealModify = &dmStr
+		resp.LastDealAgeS = &age
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 type dealsSheetsResponse struct {
